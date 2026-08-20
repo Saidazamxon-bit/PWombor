@@ -49,14 +49,40 @@ function ScannerModal({ onClose, onScan }: { onClose: () => void; onScan: (code:
         const scanner = new Html5Qrcode(elementId)
         scannerRef.current = scanner
         setLoading(false)
-        scanner.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 260, height: 160 } },
-          (decodedText: string) => {
-            if (!cancelled) onScan(decodedText.trim())
-          },
-          () => { /* skanerlanmagan freymlar — e'tiborsiz qoldiramiz */ }
-        ).catch((err: any) => {
+        const startScanner = async () => {
+          let cameraId: string | undefined
+          try {
+            const cameras = await Html5Qrcode.getCameras()
+            cameraId = cameras.find((camera: { id: string; label: string }) => {
+              const label = (camera.label || '').toLowerCase()
+              return (label.includes('back') || label.includes('orqa')) && !label.includes('ultra') && !label.includes('0.5')
+            })?.id
+          } catch {}
+
+          const startConfig = { fps: 10, qrbox: { width: 260, height: 160 } }
+          const startTarget = cameraId || { facingMode: 'environment' }
+          await scanner.start(
+            startTarget,
+            startConfig,
+            (decodedText: string) => {
+              if (!cancelled) onScan(decodedText.trim())
+            },
+            () => { /* skanerlanmagan freymlar — e'tiborsiz qoldiramiz */ }
+          )
+
+          try {
+            const capabilities = await Promise.resolve(scanner.getRunningTrackCameraCapabilities?.())
+            const zoomFeature = typeof capabilities?.zoomFeature === 'function' ? capabilities.zoomFeature() : capabilities?.zoomFeature
+            const minZoom = typeof zoomFeature?.min === 'function' ? zoomFeature.min() : zoomFeature?.min
+            const maxZoom = typeof zoomFeature?.max === 'function' ? zoomFeature.max() : zoomFeature?.max
+            if (zoomFeature && Number(minZoom) <= 1 && Number(maxZoom) >= 1) {
+              if (typeof zoomFeature.apply === 'function') await zoomFeature.apply(1)
+              else await scanner.applyVideoConstraints?.({ advanced: [{ zoom: 1 }] })
+            }
+          } catch {}
+        }
+
+        startScanner().catch((err: any) => {
           if (!cancelled) setError('Kamerani ochib bo‘lmadi: ' + (err?.message || err) + '. Brauzer kamera ruxsatini tekshiring.')
         })
       })
