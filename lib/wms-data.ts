@@ -48,6 +48,7 @@ export const suppliers = [{ name: 'FARGO TRADE MCHJ', phone: '+998 71 200 12 12'
 export const formatDate = () => new Date().toLocaleDateString('uz-UZ', { day: '2-digit', month: 'long', year: 'numeric' })
 export const getStatusClass = (status: string) => status === 'Faol' || status === 'Yakunlangan' ? 'status-success' : status === 'Kam qoldiq' || status === 'Tekshirish kerak' ? 'status-warning' : 'status-info'
 export const getTypeClass = (type: string) => type === 'Kirim' ? 'type-in' : type === 'Chiqim' ? 'type-out' : 'type-transfer'
+export const getLocationBadge = (product: { type?: string; stock: number }) => product.type === 'tayyor' && product.stock > 0 ? { label: 'Sotuvda', className: 'status-success' } : { label: 'Omborda', className: 'status-muted' }
 export const getIcon = (name: string) => name
 export const categories = ['Qog‘oz', 'Bo‘yoqlar', 'Sarflov materiallari', 'Banner', 'Siyohlar']
 export const users = [{ name: 'Javohir Karimov', role: 'Administrator', email: 'javohir@printwork.uz', active: true }, { name: 'Madina Sobirova', role: 'Ombor mudiri', email: 'madina@printwork.uz', active: true }, { name: 'Azizbek Raximov', role: 'Operator', email: 'azizbek@printwork.uz', active: false }]

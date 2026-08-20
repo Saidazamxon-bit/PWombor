@@ -2,18 +2,18 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { BarChart3, Bell, BookOpen, Boxes, CalendarClock, ChartNoAxesCombined, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, FileBarChart, FileMinus2, LayoutDashboard, LogOut, Menu, Package, PackageCheck, PackagePlus, PackageOpen, ShoppingBag, ReceiptText, Plus, Search, Settings2, Tags, Truck, UserRound, Users, Warehouse, ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, CheckCircle2, AlertTriangle, MoreHorizontal, Download, X, TrendingUp, Pencil, Trash2, RefreshCw } from 'lucide-react'
-import { allNavItems, dashboardCards as staticDashboardCards, detailText, getStatusClass, getTypeClass, guideContent, labelMap, money, navGroups, reportTypes, roles as staticRoles, productTypes, productTypeLabel, productTypeByPage, randomBarcode } from '@/lib/wms-data'
+import { allNavItems, dashboardCards as staticDashboardCards, detailText, getLocationBadge, getStatusClass, getTypeClass, guideContent, labelMap, money, navGroups, reportTypes, roles as staticRoles, productTypes, productTypeLabel, productTypeByPage, randomBarcode } from '@/lib/wms-data'
 import { categoriesApi, dashboardApi, expiryApi, productsApi, barcodeApi, reportsApi, settingsApi, suppliersApi, transactionsApi, usersApi, warehousesApi } from '@/lib/api'
 import { BarcodeScanButton } from '@/components/barcode-scanner'
 import { BarcodeImage, downloadBarcodeLabel } from '@/components/barcode-image'
 
-type Product = { id: string; productId: string; name: string; sku: string; barcode: string; category: string; unit: string; price: number; stock: number; minStock: number; warehouse: string; warehouseId: string; status: string; type?: string }
+type Product = { id: string; productId: string; name: string; sku: string; barcode: string; category: string; categoryId: string | null; categoryParentId: string | null; unit: string; price: number; stock: number; minStock: number; warehouse: string; warehouseId: string; status: string; type?: string }
 type Warehouse = { id: string; name: string; code: string; products: number; value: number }
 type Supplier = { id: string; name: string; phone: string; orders: number; debt: number; status: string }
 type AppUser = { id: string; name: string; email: string; role: string; active: boolean }
 type ExpiryRow = { id: string; name: string; barcode: string; batch: string; expiry: string; days: number; qty: number; warehouse: string }
 type Transaction = { id: string; docNo: string; type: string; reference: string; qty: number; amount: number; status: string; date?: string; productName?: string; product?: string; productId?: string }
-type Category = { id: string; name: string }
+type Category = { id: string; name: string; parentId: string | null }
 type CurrentUser = { id: string; username: string; role: string }
 
 const iconFor: Record<string, React.ElementType> = { LayoutDashboard, Package, PackageCheck, PackagePlus, PackageOpen, ShoppingBag, ReceiptText, Boxes, ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight, FileMinus2, Truck, ChartNoAxesCombined, FileBarChart, CalendarClock, Settings2, Users, Warehouse, Tags, BookOpen }
@@ -48,13 +48,16 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState<'name' | 'id' | 'barcode'>('name')
   const [toast, setToast] = useState('')
-  const [modal, setModal] = useState<'product' | 'simple' | 'warehouse' | 'transaction' | 'expiry' | null>(null)
+  const [modal, setModal] = useState<'product' | 'simple' | 'category' | 'warehouse' | 'transaction' | 'expiry' | null>(null)
   const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [presetProductType, setPresetProductType] = useState<string | undefined>(undefined)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [bolimFilter, setBolimFilter] = useState('')
+  const [kategoriyaFilter, setKategoriyaFilter] = useState('')
+  const [categoryDeleteError, setCategoryDeleteError] = useState<{ category: Category; message: string } | null>(null)
   const notifications = useMemo(() => [
     ...products
       .filter((product) => product.status === 'Kam qoldiq')
@@ -84,6 +87,8 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
     const wantedType = productTypeByPage[page]
     if (wantedType) base = base.filter((p) => (p.type || 'tayyor') === wantedType)
     if (page === 'available') base = base.filter((p) => p.stock > 0)
+    if (bolimFilter) base = base.filter((p) => p.categoryParentId === bolimFilter)
+    if (kategoriyaFilter) base = base.filter((p) => p.categoryId === kategoriyaFilter)
     const q = search.trim().toLowerCase()
     if (!q) return base
     return base.filter((p) => {
@@ -91,9 +96,9 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
       if (searchMode === 'barcode') return (p.barcode || '').toLowerCase().includes(q)
       return p.name.toLowerCase().includes(q)
     })
-  }, [products, search, searchMode, page])
+  }, [products, search, searchMode, page, bolimFilter, kategoriyaFilter])
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 3000) }
-  const go = (key: string) => { setPage(key); setMobileOpen(false); setSearch('') }
+  const go = (key: string) => { setPage(key); setMobileOpen(false); setSearch(''); setBolimFilter(''); setKategoriyaFilter('') }
   const pageTitle = labelMap[page] ?? 'Bosh sahifa'
   const initials = currentUser.username.slice(0, 2).toUpperCase()
 
@@ -148,7 +153,7 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
 
   const saveSimpleEntry = async (text: string) => {
     if (page === 'suppliers') return withNotify(() => suppliersApi.create({ name: text }), 'Yetkazib beruvchi qo‘shildi')
-    if (page === 'categories') return withNotify(() => categoriesApi.create(text), 'Kategoriya qo‘shildi')
+    if (page === 'categories') return withNotify(() => categoriesApi.create(text), 'Bo‘lim qo‘shildi')
     return Promise.resolve()
   }
 
@@ -161,6 +166,10 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
   const deleteExpiry = (row: ExpiryRow) => { if (confirm(`"${row.name}" partiyasini o‘chirasizmi?`)) withNotify(() => expiryApi.remove(row.id), 'Partiya o‘chirildi') }
   const toggleUserActive = (u: AppUser) => withNotify(() => usersApi.update({ id: u.id, isActive: !u.active }), 'Foydalanuvchi holati yangilandi')
   const changeUserRole = (u: AppUser, role: string) => withNotify(() => usersApi.update({ id: u.id, role }), 'Rol yangilandi')
+  const deleteCategory = async (category: Category, force = false) => {
+    try { await categoriesApi.remove(category.id, force); setCategoryDeleteError(null); await loadData(); notify(force ? 'Bo‘lim va kategoriyalari o‘chirildi' : 'Kategoriya o‘chirildi') }
+    catch (e: any) { if (!force) setCategoryDeleteError({ category, message: e?.message ?? 'Bu bo‘limni o‘chirib bo‘lmaydi' }); else notify(`Xatolik: ${e?.message ?? 'o‘chirilmadi'}`) }
+  }
 
   return <div className="min-h-screen bg-background text-foreground">
     <aside className={`fixed inset-y-0 left-0 z-40 hidden flex-col bg-sidebar text-sidebar-foreground transition-all duration-200 lg:flex ${sidebarOpen ? 'w-64' : 'w-[76px]'}`}>
@@ -199,7 +208,7 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
           ? <UsersPage users={usersList} currentUser={currentUser} onToggleActive={toggleUserActive} onChangeRole={changeUserRole} />
           : page === 'expiry'
           ? <ExpiryPage rows={expiryList} onAdd={() => setModal('expiry')} onDelete={deleteExpiry} />
-          : <PageContent page={page} title={pageTitle} products={filteredProducts} transactions={transactionsList} suppliers={suppliersList} users={usersList} expiry={expiryList} categories={categoriesList} search={search} setSearch={setSearch} searchMode={searchMode} setSearchMode={setSearchMode} onProduct={setSelectedProduct} onDeleteProduct={deleteProduct}
+          : <PageContent page={page} title={pageTitle} products={filteredProducts} transactions={transactionsList} suppliers={suppliersList} users={usersList} expiry={expiryList} categories={categoriesList} search={search} setSearch={setSearch} searchMode={searchMode} setSearchMode={setSearchMode} bolimFilter={bolimFilter} setBolimFilter={setBolimFilter} kategoriyaFilter={kategoriyaFilter} setKategoriyaFilter={setKategoriyaFilter} onProduct={setSelectedProduct} onDeleteProduct={deleteProduct} onAddCategory={() => setModal('category')} onDeleteCategory={deleteCategory}
               onEditProduct={(p) => { setEditingProduct(p); setModal('product') }}
               onAction={() => { setEditingProduct(null); setPresetProductType(productTypeByPage[page]); setModal(productLikePages.has(page) ? 'product' : txTypeKey[page] ? 'transaction' : 'simple') }} onNavigate={go} />}
       </main>
@@ -207,6 +216,8 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
     {selectedProduct && <ProductDrawer product={selectedProduct} onClose={() => setSelectedProduct(null)} />}
     {modal === 'warehouse' && <WarehouseModal warehouse={editingWarehouse} onClose={() => { setModal(null); setEditingWarehouse(null) }} onSave={async (input) => { await saveWarehouse(input); setModal(null); setEditingWarehouse(null) }} />}
     {modal === 'product' && <ProductModal warehouses={warehousesList} categories={categoriesList} product={editingProduct} presetType={presetProductType} onClose={() => { setModal(null); setEditingProduct(null); setPresetProductType(undefined) }} onSave={async (input) => { await saveProduct(input); setModal(null); setEditingProduct(null); setPresetProductType(undefined) }} />}
+    {modal === 'category' && <CategoryModal categories={categoriesList} onClose={() => setModal(null)} onSave={async (name, parentId) => { await withNotify(() => categoriesApi.create(name, parentId), parentId ? 'Kategoriya qo‘shildi' : 'Bo‘lim qo‘shildi'); setModal(null) }} />}
+    {categoryDeleteError && <CategoryDeleteModal category={categoryDeleteError.category} message={categoryDeleteError.message} onClose={() => setCategoryDeleteError(null)} onForce={() => deleteCategory(categoryDeleteError.category, true)} />}
     {modal === 'transaction' && txTypeKey[page] && <TransactionModal pageKey={page} label={txTypeLabel[page]} products={products} warehouses={warehousesList} suppliers={suppliersList} categories={categoriesList} onClose={() => setModal(null)} onSave={async (input) => { await saveTransaction(input); setModal(null) }} />}
     {modal === 'expiry' && <ExpiryModal products={products} warehouses={warehousesList} onClose={() => setModal(null)} onSave={async (input) => { await saveExpiry(input); setModal(null) }} />}
     {modal === 'simple' && <SimpleModal page={page} onClose={() => setModal(null)} onSave={async (text) => { await saveSimpleEntry(text); setModal(null) }} />}
@@ -365,7 +376,7 @@ function GuidePage({ onNavigate }: { onNavigate: (key: string) => void }) {
   </>
 }
 
-function PageContent({ page, title, products, transactions, suppliers, users, expiry, categories, search, setSearch, searchMode, setSearchMode, onProduct, onDeleteProduct, onEditProduct, onAction, onNavigate }: { page: string; title: string; products: Product[]; transactions: Transaction[]; suppliers: Supplier[]; users: AppUser[]; expiry: ExpiryRow[]; categories: Category[]; search: string; setSearch: (s: string) => void; searchMode: 'name' | 'id' | 'barcode'; setSearchMode: (m: 'name' | 'id' | 'barcode') => void; onProduct: (p: Product) => void; onDeleteProduct: (p: Product) => void; onEditProduct: (p: Product) => void; onAction: () => void; onNavigate: (key: string) => void }) {
+function PageContent({ page, title, products, transactions, suppliers, users, expiry, categories, search, setSearch, searchMode, setSearchMode, bolimFilter, setBolimFilter, kategoriyaFilter, setKategoriyaFilter, onProduct, onDeleteProduct, onEditProduct, onAction, onNavigate, onAddCategory, onDeleteCategory }: { page: string; title: string; products: Product[]; transactions: Transaction[]; suppliers: Supplier[]; users: AppUser[]; expiry: ExpiryRow[]; categories: Category[]; search: string; setSearch: (s: string) => void; searchMode: 'name' | 'id' | 'barcode'; setSearchMode: (m: 'name' | 'id' | 'barcode') => void; bolimFilter: string; setBolimFilter: (s: string) => void; kategoriyaFilter: string; setKategoriyaFilter: (s: string) => void; onProduct: (p: Product) => void; onDeleteProduct: (p: Product) => void; onEditProduct: (p: Product) => void; onAction: () => void; onNavigate: (key: string) => void; onAddCategory: () => void; onDeleteCategory: (category: Category) => void }) {
   const isProductPage = page === 'products' || page === 'inventory' || page === 'ready-products' || page === 'raw-products' || page === 'semi-products' || page === 'available'
   const searchPlaceholder = searchMode === 'id' ? 'Mahsulot ID raqami...' : searchMode === 'barcode' ? 'Shtrix kodni kiriting...' : 'Mahsulot nomi...'
   const productPageDesc: Record<string, string> = {
@@ -377,15 +388,17 @@ function PageContent({ page, title, products, transactions, suppliers, users, ex
     available: 'Qoldig‘i mavjud, hozir sotuvga tayyor mahsulotlar',
   }
   if (isProductPage) return <><PageHeader title={title} description={productPageDesc[page]} action="Mahsulot qo‘shish" onAction={onAction} /><Card className="overflow-hidden"><div className="flex flex-col gap-3 border-b p-4 md:flex-row md:items-center md:justify-between md:p-5">
-    <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center md:max-w-lg">
+    <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
       <select value={searchMode} onChange={(e) => setSearchMode(e.target.value as any)} className="h-10 shrink-0 rounded-lg border bg-background px-3 text-sm outline-none focus:border-primary">
         <option value="name">Nom bo‘yicha</option>
         <option value="id">ID bo‘yicha</option>
         <option value="barcode">Shtrix kod bo‘yicha</option>
-      </select>
-      <div className="relative w-full"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={searchPlaceholder} className="h-10 w-full rounded-lg border bg-background pl-9 pr-3 text-sm outline-none focus:border-primary" /></div>
+        </select>
+          <div className="relative w-full"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={searchPlaceholder} className="h-10 w-full rounded-lg border bg-background pl-9 pr-3 text-sm outline-none focus:border-primary" /></div>
+      <select value={bolimFilter} onChange={(e) => { setBolimFilter(e.target.value); setKategoriyaFilter('') }} className="h-10 shrink-0 rounded-lg border bg-background px-3 text-sm outline-none focus:border-primary"><option value="">Barcha bo‘limlar</option>{categories.filter((category) => !category.parentId).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
+      <select value={kategoriyaFilter} onChange={(e) => setKategoriyaFilter(e.target.value)} disabled={!bolimFilter} className="h-10 shrink-0 rounded-lg border bg-background px-3 text-sm outline-none focus:border-primary disabled:opacity-50"><option value="">Barcha kategoriyalar</option>{categories.filter((category) => category.parentId === bolimFilter).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
     </div>
-  </div><div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-5 py-3">ID</th><th className="px-5 py-3">Mahsulot</th><th className="px-5 py-3">Turi</th><th className="px-5 py-3">Shtrix kod</th><th className="px-5 py-3">Kategoriya</th><th className="px-5 py-3">Ombor</th><th className="px-5 py-3">Qoldiq</th><th className="px-5 py-3">Narx</th><th className="px-5 py-3">Holat</th><th className="px-5 py-3"></th></tr></thead><tbody>{products.map((p) => <tr key={p.id} className="border-b last:border-0 hover:bg-muted/30"><td className="px-5 py-4 font-mono text-xs text-muted-foreground">#{p.productId}</td><td className="cursor-pointer px-5 py-4" onClick={() => onProduct(p)}><div className="font-semibold">{p.name}</div><div className="mt-0.5 text-xs text-muted-foreground">{p.unit}</div></td><td className="px-5 py-4 text-xs text-muted-foreground">{productTypeLabel[p.type || 'tayyor']}</td><td className="px-5 py-4 font-mono text-xs text-muted-foreground">{p.barcode || '—'}</td><td className="px-5 py-4">{p.category}</td><td className="px-5 py-4">{p.warehouse}</td><td className="px-5 py-4 font-semibold">{p.stock} {p.unit}</td><td className="px-5 py-4">{money(p.price)}</td><td className="px-5 py-4"><Badge className={getStatusClass(p.status)}>{p.status}</Badge></td><td className="px-5 py-4"><div className="flex justify-end gap-1">{p.barcode && <Button variant="ghost" onClick={() => downloadBarcodeLabel(p)}><Download className="size-4" /></Button>}<Button variant="ghost" onClick={() => onEditProduct(p)}><Pencil className="size-4" /></Button><Button variant="ghost" onClick={() => onDeleteProduct(p)}><Trash2 className="size-4" /></Button></div></td></tr>)}</tbody></table></div>{products.length === 0 && <div className="p-12 text-center text-sm text-muted-foreground">Mahsulot topilmadi</div>}</Card></>
+  </div><div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-5 py-3">ID</th><th className="px-5 py-3">Mahsulot</th><th className="px-5 py-3">Turi</th><th className="px-5 py-3">Shtrix kod</th><th className="px-5 py-3">Kategoriya</th><th className="px-5 py-3">Ombor</th><th className="px-5 py-3">Qoldiq</th><th className="px-5 py-3">Narx</th><th className="px-5 py-3">Holat</th><th className="px-5 py-3">Joylashuv</th><th className="px-5 py-3"></th></tr></thead><tbody>{products.map((p) => { const location = getLocationBadge(p); return <tr key={p.id} className="border-b last:border-0 hover:bg-muted/30"><td className="px-5 py-4 font-mono text-xs text-muted-foreground">#{p.productId}</td><td className="cursor-pointer px-5 py-4" onClick={() => onProduct(p)}><div className="font-semibold">{p.name}</div><div className="mt-0.5 text-xs text-muted-foreground">{p.unit}</div></td><td className="px-5 py-4 text-xs text-muted-foreground">{productTypeLabel[p.type || 'tayyor']}</td><td className="px-5 py-4 font-mono text-xs text-muted-foreground">{p.barcode || '—'}</td><td className="px-5 py-4"><div className="text-xs text-muted-foreground">{categories.find((category) => category.id === p.categoryParentId)?.name || 'Bo‘limsiz'}</div><div className="font-semibold">{p.category}</div></td><td className="px-5 py-4">{p.warehouse}</td><td className="px-5 py-4 font-semibold">{p.stock} {p.unit}</td><td className="px-5 py-4">{money(p.price)}</td><td className="px-5 py-4"><Badge className={getStatusClass(p.status)}>{p.status}</Badge></td><td className="px-5 py-4"><Badge className={location.className}>{location.label}</Badge></td><td className="px-5 py-4"><div className="flex justify-end gap-1">{p.barcode && <Button variant="ghost" onClick={() => downloadBarcodeLabel(p)}><Download className="size-4" /></Button>}<Button variant="ghost" onClick={() => onEditProduct(p)}><Pencil className="size-4" /></Button><Button variant="ghost" onClick={() => onDeleteProduct(p)}><Trash2 className="size-4" /></Button></div></td></tr> })}</tbody></table></div>{products.length === 0 && <div className="p-12 text-center text-sm text-muted-foreground">Mahsulot topilmadi</div>}</Card></>
 
   const txType: Record<string, string> = { purchases: 'Kirim', sales: 'Chiqim', sold: 'Chiqim', transfers: 'Ko‘chirish', writeoffs: 'Hisobdan chiqarish' }
   if (txType[page]) {
@@ -393,7 +406,10 @@ function PageContent({ page, title, products, transactions, suppliers, users, ex
     return <><PageHeader title={title} description={detailText[page] ?? 'Hujjatlar ro‘yxati'} action="Yangi yaratish" onAction={onAction} /><Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-5 py-3 font-medium">Hujjat</th><th className="px-5 py-3 font-medium">Izoh</th><th className="px-5 py-3 font-medium">Miqdor</th><th className="px-5 py-3 font-medium">Summa</th><th className="px-5 py-3 font-medium">Holat</th></tr></thead><tbody>{rows.map((t) => <tr key={t.id} className="border-b last:border-0 hover:bg-muted/30"><td className="px-5 py-4 font-semibold">{t.docNo}</td><td className="px-5 py-4 text-muted-foreground">{t.reference}</td><td className="px-5 py-4">{t.qty || '—'}</td><td className="px-5 py-4">{t.amount ? money(t.amount) : '—'}</td><td className="px-5 py-4"><Badge className="status-success">{t.status}</Badge></td></tr>)}</tbody></table></div>{rows.length === 0 && <div className="p-12 text-center text-sm text-muted-foreground">Hozircha hujjat yo‘q</div>}</Card></>
   }
 
-  if (page === 'categories') return <><PageHeader title={title} description={detailText[page]} action="Kategoriya qo‘shish" onAction={onAction} /><Card className="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-5 py-3 font-medium">Kategoriya</th></tr></thead><tbody>{categories.map((c) => <tr key={c.id} className="border-b last:border-0"><td className="px-5 py-4 font-medium">{c.name}</td></tr>)}</tbody></table></div>{categories.length === 0 && <div className="p-12 text-center text-sm text-muted-foreground">Hozircha kategoriya yo‘q</div>}</Card></>
+  if (page === 'categories') {
+    const sections = categories.filter((category) => !category.parentId)
+    return <><PageHeader title={title} description={detailText[page]} action="Kategoriya qo‘shish" onAction={onAddCategory} /><Card className="p-5"><div className="space-y-5">{sections.map((section) => { const children = categories.filter((category) => category.parentId === section.id); return <div key={section.id} className="rounded-xl border bg-muted/20 p-4"><div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">Bo‘lim</p><h2 className="mt-1 text-lg font-bold">{section.name}</h2></div><Button variant="ghost" onClick={() => onDeleteCategory(section)}><Trash2 className="size-4" /></Button></div><div className="mt-3 space-y-2 border-l-2 border-primary/20 pl-4">{children.map((child) => <div key={child.id} className="flex items-center justify-between rounded-lg border bg-card px-3 py-2 text-sm"><span>{child.name}</span><Button variant="ghost" onClick={() => onDeleteCategory(child)}><Trash2 className="size-4" /></Button></div>)}{children.length === 0 && <p className="text-sm text-muted-foreground">Bu bo‘limda kategoriya yo‘q</p>}</div></div>})}{sections.length === 0 && <EmptyState text="Hozircha kategoriya yo‘q" />}</div></Card></>
+  }
 
   const data = page === 'suppliers' ? suppliers : page === 'users' ? users : page === 'roles' ? staticRoles : page === 'expiry' ? expiry : null
   if (data) return <GenericTable page={page} title={title} data={data} onAction={onAction} />
@@ -406,6 +422,19 @@ function GenericTable({ page, title, data, onAction }: { page: string; title: st
 }
 
 function ProductDrawer({ product, onClose }: { product: Product; onClose: () => void }) { return <><div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} /><div className="fixed inset-y-0 right-0 z-50 w-full max-w-md overflow-y-auto bg-card p-6 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">Mahsulot tafsilotlari</p><h2 className="mt-2 text-xl font-bold">{product.name}</h2><p className="mt-1 font-mono text-xs text-muted-foreground">ID: {product.productId} • SKU: {product.sku}</p></div><Button variant="ghost" onClick={onClose}><X className="size-5" /></Button></div><div className="mt-8 grid grid-cols-2 gap-3"><Card className="bg-muted/30 p-4"><div className="text-xs text-muted-foreground">Qoldiq</div><div className="mt-2 text-xl font-bold">{product.stock}</div><div className="text-xs text-muted-foreground">{product.unit}</div></Card><Card className="bg-muted/30 p-4"><div className="text-xs text-muted-foreground">Sotuv narxi</div><div className="mt-2 text-lg font-bold">{money(product.price)}</div></Card></div>{product.barcode && <Card className="mt-4 flex flex-col items-center bg-muted/20 p-4"><div className="mb-2 text-xs text-muted-foreground">Shtrix kod (ID: {product.productId})</div><BarcodeImage value={product.barcode} className="max-w-full" /><Button variant="outline" className="mt-3" onClick={() => downloadBarcodeLabel(product)}><Download className="size-4" />Shtrix kod + ID yuklab olish</Button></Card>}<div className="mt-8 flex flex-col gap-4">{[['Kategoriya', product.category], ['Ombor', product.warehouse], ['Minimal qoldiq', `${product.minStock} ${product.unit}`], ['Holat', product.status]].map(([a, b]) => <div key={a} className="flex items-center justify-between border-b pb-3 text-sm"><span className="text-muted-foreground">{a}</span><span className="font-semibold">{b}</span></div>)}</div><Button className="mt-8 w-full" onClick={onClose}>Yopish</Button></div></> }
+
+function CategoryModal({ categories, onClose, onSave }: { categories: Category[]; onClose: () => void; onSave: (name: string, parentId: string | null) => Promise<void> }) {
+  const [mode, setMode] = useState<'section' | 'category'>('section')
+  const [name, setName] = useState('')
+  const [parentId, setParentId] = useState('')
+  const [saving, setSaving] = useState(false)
+  const sections = categories.filter((category) => !category.parentId)
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4" onClick={onClose}><div className="mx-auto mt-[12vh] max-w-md rounded-xl border bg-card p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">{mode === 'section' ? 'Bo‘lim qo‘shish' : 'Kategoriya qo‘shish'}</h2><p className="mt-1 text-sm text-muted-foreground">Avval yozuv turini tanlang.</p></div><Button variant="ghost" onClick={onClose}><X className="size-5" /></Button></div><div className="mt-5 grid grid-cols-2 gap-2"><label className={`cursor-pointer rounded-lg border p-3 text-sm ${mode === 'section' ? 'border-primary bg-primary/5' : ''}`}><input type="radio" checked={mode === 'section'} onChange={() => { setMode('section'); setParentId('') }} className="mr-2" />Bo‘lim</label><label className={`cursor-pointer rounded-lg border p-3 text-sm ${mode === 'category' ? 'border-primary bg-primary/5' : ''}`}><input type="radio" checked={mode === 'category'} onChange={() => setMode('category')} className="mr-2" />Kategoriya</label></div><Field label={mode === 'section' ? 'Bo‘lim nomi' : 'Kategoriya nomi'}><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Masalan: Kitoblar" className={inputCls} /></Field>{mode === 'category' && <Field label="Bo‘lim"><select value={parentId} onChange={(event) => setParentId(event.target.value)} className={inputCls}><option value="">Bo‘limni tanlang</option>{sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}</select></Field>}<div className="mt-6 flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Bekor qilish</Button><Button disabled={saving} onClick={async () => { if (!name.trim() || (mode === 'category' && !parentId)) return; setSaving(true); await onSave(name.trim(), mode === 'category' ? parentId : null); setSaving(false) }}>{saving ? 'Saqlanmoqda...' : 'Saqlash'}</Button></div></div></div>
+}
+
+function CategoryDeleteModal({ category, message, onClose, onForce }: { category: Category; message: string; onClose: () => void; onForce: () => void }) {
+  return <div className="fixed inset-0 z-50 bg-black/40 p-4" onClick={onClose}><div className="mx-auto mt-[18vh] max-w-md rounded-xl border bg-card p-6 shadow-2xl" onClick={(event) => event.stopPropagation()}><h2 className="text-lg font-bold">{category.name} ni o‘chirish</h2><p className="mt-3 text-sm text-muted-foreground">{message}</p><p className="mt-3 text-sm">Baribir bo‘lim va unga tegishli barcha kategoriyalar o‘chirilsinmi?</p><div className="mt-6 flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Bekor qilish</Button><Button onClick={onForce}>Baribir hammasini o‘chirish</Button></div></div></div>
+}
 
 function SimpleModal({ page, onClose, onSave }: { page: string; onClose: () => void; onSave: (name: string) => Promise<void> | void }) {
   const [name, setName] = useState('')
@@ -445,7 +474,8 @@ function ProductModal({ warehouses, categories, product, presetType, onClose, on
   const isEdit = !!product
   const [name, setName] = useState(product?.name ?? '')
   const [warehouse, setWarehouse] = useState(product?.warehouse ?? warehouses[0]?.name ?? '')
-  const [category, setCategory] = useState(product?.category ?? '')
+  const [bolimId, setBolimId] = useState(product?.categoryParentId ?? '')
+  const [categoryId, setCategoryId] = useState(product?.categoryId ?? '')
   const [type, setType] = useState(product?.type ?? presetType ?? 'tayyor')
   const [unit, setUnit] = useState(product?.unit ?? 'dona')
   const [stock, setStock] = useState(product ? String(product.stock) : '')
@@ -455,6 +485,9 @@ function ProductModal({ warehouses, categories, product, presetType, onClose, on
   const [error, setError] = useState('')
   // Oyna ochilgan zahoti — hech narsa kiritilmasa ham — ko'rinadigan tasodifiy shtrix kod. Faqat vizual: "Saqlash" bosilmasa, hech qayerga yozilmaydi.
   const [previewBarcode, setPreviewBarcode] = useState(() => product?.barcode || randomBarcode())
+  const sections = categories.filter((category) => !category.parentId)
+  const childCategories = categories.filter((category) => category.parentId === bolimId)
+  const selectedCategory = categories.find((category) => category.id === categoryId)
   return <><div className="fixed inset-0 z-50 bg-black/40 p-4 overflow-y-auto" onClick={onClose}><div className="mx-auto my-[6vh] max-w-md rounded-xl border bg-card p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
     <div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">{isEdit ? 'Mahsulotni tahrirlash' : 'Mahsulot qo‘shish'}</h2><p className="mt-1 text-sm text-muted-foreground">{isEdit ? 'Mahsulot maʼlumotlarini yangilang.' : 'ID raqami saqlaganingizda avtomatik beriladi.'}</p></div><Button variant="ghost" onClick={onClose}><X className="size-5" /></Button></div>
 
@@ -470,7 +503,8 @@ function ProductModal({ warehouses, categories, product, presetType, onClose, on
         {productTypes.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
       </select>
     </Field>
-    <Field label="Kategoriya"><input list="pw-categories" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Mavjudidan tanlang yoki yangi yozing" className={inputCls} /><datalist id="pw-categories">{categories.map((c) => <option key={c.id} value={c.name} />)}</datalist></Field>
+    <Field label="Bo‘lim"><select value={bolimId} onChange={(e) => { setBolimId(e.target.value); setCategoryId('') }} className={inputCls}><option value="">Bo‘limni tanlang</option>{sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}</select></Field>
+    <Field label="Kategoriya"><select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} disabled={!bolimId} className={inputCls + ' disabled:opacity-50'}><option value="">Kategoriyani tanlang</option>{childCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field>
     <Field label="Ombor"><select value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className={inputCls}>{warehouses.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}</select></Field>
     <div className="mt-4 grid grid-cols-2 gap-3">
       <Field label="O‘lchov birligi"><input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="dona / metr / quti" className={inputCls} /></Field>
@@ -482,7 +516,7 @@ function ProductModal({ warehouses, categories, product, presetType, onClose, on
     </div>
     {!isEdit && <p className="mt-4 rounded-lg bg-primary/5 px-3 py-2 text-xs text-muted-foreground">Saqlagach, mahsulotga tizim tomonidan avtomatik ID raqami va shtrix kod beriladi — mahsulot ustiga bosib, uni yuklab olishingiz mumkin.</p>}
     {error && <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
-    <div className="mt-6 flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Bekor qilish</Button><Button disabled={saving} onClick={async () => { if (!name || !warehouse) { setError('Mahsulot nomi va omborni to‘ldiring.'); return }; setSaving(true); setError(''); try { await onSave({ name, warehouse, category, type, unit, stock: Number(stock) || 0, minStock: Number(minStock) || 0, price: Number(price) || 0 }) } catch (e: any) { setError(e?.message ?? 'Xatolik') } finally { setSaving(false) } }}>{saving ? 'Saqlanmoqda...' : 'Saqlash'}</Button></div>
+    <div className="mt-6 flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Bekor qilish</Button><Button disabled={saving} onClick={async () => { if (!name || !warehouse || !bolimId || !categoryId || !selectedCategory) { setError('Mahsulot nomi, bo‘lim, kategoriya va omborni to‘ldiring.'); return }; setSaving(true); setError(''); try { await onSave({ name, warehouse, categoryId, category: selectedCategory.name, type, unit, stock: Number(stock) || 0, minStock: Number(minStock) || 0, price: Number(price) || 0 }) } catch (e: any) { setError(e?.message ?? 'Xatolik') } finally { setSaving(false) } }}>{saving ? 'Saqlanmoqda...' : 'Saqlash'}</Button></div>
   </div></div></>
 }
 

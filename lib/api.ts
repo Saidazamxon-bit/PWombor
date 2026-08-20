@@ -88,8 +88,8 @@ export const suppliersApi = {
 
 export const categoriesApi = {
   list: () => api('/categories.php'),
-  create: (name: string) => api('/categories.php', { method: 'POST', body: { name } }),
-  remove: (id: string) => api(`/categories.php?id=${id}`, { method: 'DELETE' }),
+  create: (name: string, parentId?: string | null) => api('/categories.php', { method: 'POST', body: { name, parentId: parentId ?? null } }),
+  remove: (id: string, force = false) => api(`/categories.php?id=${id}${force ? '&force=1' : ''}`, { method: 'DELETE' }),
 }
 
 export const usersApi = {
