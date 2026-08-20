@@ -21,6 +21,12 @@ const productLikePages = new Set(['products', 'inventory', 'ready-products', 'ra
 const roleLabel: Record<string, string> = { admin: 'Administrator', manager: 'Ombor mudiri', operator: 'Operator' }
 const txTypeKey: Record<string, string> = { purchases: 'kirim', sales: 'chiqim', sold: 'chiqim', transfers: 'transfer', writeoffs: 'hisobdan_chiqarish' }
 const txTypeLabel: Record<string, string> = { purchases: 'Kirim', sales: 'Chiqim', sold: 'Chiqim', transfers: 'Ko‘chirish', writeoffs: 'Hisobdan chiqarish' }
+const formatTxDate = (value?: string) => {
+  if (!value) return '—'
+  const date = new Date(value.replace(' ', 'T'))
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('uz-UZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
 
 function Button({ children, onClick, variant = 'primary', className = '', type = 'button', disabled = false }: { children: React.ReactNode; onClick?: () => void; variant?: 'primary' | 'outline' | 'ghost'; className?: string; type?: 'button' | 'submit'; disabled?: boolean }) {
   return <button type={type} disabled={disabled} onClick={onClick} className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50 ${variant === 'primary' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : variant === 'outline' ? 'border bg-card text-foreground hover:bg-muted' : 'text-muted-foreground hover:bg-muted hover:text-foreground'} ${className}`}>{children}</button>
@@ -151,9 +157,9 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
   const deleteWarehouse = (w: Warehouse) => { if (confirm(`"${w.name}" omborini o‘chirasizmi?`)) withNotify(() => warehousesApi.remove(w.id), 'Ombor o‘chirildi') }
   const deleteProduct = (p: Product) => { if (confirm(`"${p.name}" ni o‘chirasizmi?`)) withNotify(() => productsApi.remove(p.id), 'Mahsulot o‘chirildi') }
 
-  const saveSimpleEntry = async (text: string) => {
+  const saveSimpleEntry = async (text: string, parentId?: string | null) => {
     if (page === 'suppliers') return withNotify(() => suppliersApi.create({ name: text }), 'Yetkazib beruvchi qo‘shildi')
-    if (page === 'categories') return withNotify(() => categoriesApi.create(text), 'Bo‘lim qo‘shildi')
+    if (page === 'categories') return withNotify(() => categoriesApi.create(text, parentId), parentId ? 'Kategoriya qo‘shildi' : 'Bo‘lim qo‘shildi')
     return Promise.resolve()
   }
 
@@ -327,15 +333,16 @@ function ReportsPage({ products, transactions, warehouses }: { products: Product
   const [rows, setRows] = useState<Record<string, any>[]>([])
   const [columns, setColumns] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  const [pdfLoading, setPdfLoading] = useState(false)
   const [generated, setGenerated] = useState(false)
 
   const fallback = () => {
     const productRows = products.filter((product) => !warehouse || product.warehouse === warehouse)
     if (selectedType === 'Ombor qoldig‘i') return productRows.map((product) => ({ Nomi: product.name, Ombor: product.warehouse, Qoldiq: `${product.stock} ${product.unit}`, Narx: product.price, 'Jami qiymat': product.stock * product.price }))
     if (selectedType === 'Inventarizatsiya') return productRows.map((product) => ({ ID: product.productId, Nomi: product.name, Turi: productTypeLabel[product.type || 'tayyor'], Qoldiq: product.stock, 'Min. qoldiq': product.minStock, Holat: product.status }))
-    const txRows = transactions.filter((transaction) => (selectedType === 'Savdo hisoboti' ? transaction.type === 'Chiqim' : transaction.type === 'Kirim' || transaction.type === 'Chiqim')).filter((transaction) => !from || (transaction.date || '').includes(from)).filter((transaction) => !to || (transaction.date || '').includes(to))
+    const txRows = transactions.filter((transaction) => (selectedType === 'Savdo hisoboti' ? transaction.type === 'Chiqim' : transaction.type === 'Kirim' || transaction.type === 'Chiqim')).filter((transaction) => { const date = transaction.date || transaction.createdAt || transaction.created_at || ''; return (!from || date.includes(from)) && (!to || date.includes(to)) })
     if (selectedType === 'Savdo hisoboti') return [{ 'Jami chiqim soni': txRows.length, 'Jami summa': txRows.reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0) }]
-    return txRows.map((transaction) => ({ Hujjat: transaction.docNo || transaction.id, Turi: transaction.type, Sana: transaction.date || '—', Izoh: transaction.reference, Summa: transaction.amount || 0 }))
+    return txRows.map((transaction) => ({ Hujjat: transaction.docNo || transaction.id, Turi: transaction.type, Sana: transaction.date || transaction.createdAt || transaction.created_at || '—', Izoh: transaction.reference, Summa: transaction.amount || 0 }))
   }
 
   const createReport = async () => {
@@ -353,11 +360,40 @@ function ReportsPage({ products, transactions, warehouses }: { products: Product
     const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })); link.download = `${selectedType}.csv`; link.click(); URL.revokeObjectURL(link.href)
   }
 
+  const downloadPdf = () => {
+    setPdfLoading(true)
+    const generatedAt = new Date()
+    const timestamp = generatedAt.toLocaleString('uz-UZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    const fileTimestamp = `${generatedAt.getFullYear()}${String(generatedAt.getMonth() + 1).padStart(2, '0')}${String(generatedAt.getDate()).padStart(2, '0')}-${String(generatedAt.getHours()).padStart(2, '0')}${String(generatedAt.getMinutes()).padStart(2, '0')}${String(generatedAt.getSeconds()).padStart(2, '0')}`
+    const fileName = `${selectedType}-${fileTimestamp}.pdf`
+    const escapeHtml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    const moneyColumns = new Set(['Narx', 'Jami qiymat', 'Summa', 'Jami summa'])
+    const formatReportValue = (column: string, value: unknown) => {
+      if (value == null || value === '') return '—'
+      if (column === 'Sana') return formatTxDate(String(value))
+      if (moneyColumns.has(column) && typeof value === 'number') return money(value)
+      return String(value)
+    }
+    const filterText = from || to ? `Davr: ${from || '—'} — ${to || '—'}` : 'Barcha davrlar'
+    const warehouseText = warehouse ? `Ombor: ${warehouse}` : 'Barcha omborlar'
+    const totalAmount = rows.reduce((sum, row) => sum + (Number(row.Summa ?? row['Jami summa']) || 0), 0)
+    const tableHead = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('')
+    const tableBody = rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(formatReportValue(column, row[column]))}</td>`).join('')}</tr>`).join('')
+    const summary = selectedType === 'Savdo hisoboti' ? `<strong>Jami chiqim soni: ${rows.length} ta | Jami summa: ${money(totalAmount)}</strong>` : `<strong>Jami qatorlar: ${rows.length} ta</strong>`
+    const printWindow = window.open('', '_blank', 'width=1200,height=800')
+    if (!printWindow) { setPdfLoading(false); return }
+    printWindow.document.write(`<!doctype html><html lang="uz"><head><meta charset="utf-8"><title>${escapeHtml(fileName)}</title><style>
+      @page { size: A4 landscape; margin: 14mm; } * { box-sizing: border-box; } body { color: #111827; font-family: Arial, sans-serif; font-size: 10px; margin: 0; } h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 14px; margin: 12px 0 4px; } p { margin: 3px 0; } .meta { color: #374151; margin-bottom: 14px; } table { border-collapse: collapse; width: 100%; table-layout: auto; } th, td { border: 1px solid #d1d5db; padding: 5px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; } th { background: #f3f4f6; font-weight: 700; } thead { display: table-header-group; } tr { page-break-inside: avoid; } .footer { border-top: 1px solid #d1d5db; margin-top: 12px; padding-top: 7px; } .print-page::after { content: 'Sahifa ' counter(page) '/' counter(pages); float: right; }
+    </style></head><body><div class="print-page"><h1>PW OMBOR — Print Work WMS</h1><h2>${escapeHtml(selectedType)}</h2><div class="meta"><p>Hisobot turi: ${escapeHtml(selectedType)}</p><p>Yaratilgan sana: ${escapeHtml(timestamp)}</p><p>${escapeHtml(filterText)}</p><p>${escapeHtml(warehouseText)}</p></div><table><thead><tr>${tableHead}</tr></thead><tbody>${tableBody}</tbody></table><div class="footer">${summary}</div></div><script>window.onload = function () { window.print(); window.onafterprint = function () { window.close(); }; }<\/script></body></html>`)
+    printWindow.document.close()
+    setPdfLoading(false)
+  }
+
   return <>
     <PageHeader title="Hisobotlar" description="Ombor va operatsiyalar bo‘yicha hisobotlarni yarating va yuklab oling." />
     <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{reportTypes.map((type) => <button key={type} onClick={() => { setSelectedType(type); setGenerated(false) }} className={`rounded-xl border p-4 text-left transition ${selectedType === type ? 'border-primary bg-primary/5 shadow-sm' : 'bg-card hover:border-primary'}`}><FileBarChart className="size-5 text-primary" /><p className="mt-3 text-sm font-semibold">{type}</p><p className="mt-1 text-xs text-muted-foreground">{type === 'Ombor qoldig‘i' ? 'Joriy qoldiq va qiymat' : type === 'Kirim-chiqim' ? 'Operatsiyalar tarixi' : type === 'Savdo hisoboti' ? 'Chiqimlar yig‘indisi' : 'To‘liq inventar holati'}</p></button>)}</div>
     <Card className="p-5"><div className="grid gap-4 md:grid-cols-4 md:items-end"><Field label="Boshlanish sanasi"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} /></Field><Field label="Tugash sanasi"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} /></Field><Field label="Ombor"><select value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className={inputCls}><option value="">Barcha omborlar</option>{warehouses.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select></Field><Button onClick={createReport} disabled={loading}>{loading ? 'Yuklanmoqda...' : 'Hisobotni yaratish'}</Button></div></Card>
-    {generated && <Card className="mt-6 overflow-hidden"><div className="flex items-center justify-between border-b p-5"><div><h2 className="font-semibold">{selectedType}</h2><p className="mt-1 text-xs text-muted-foreground">{rows.length} ta natija</p></div>{rows.length > 0 && <Button variant="outline" onClick={downloadCsv}><Download className="size-4" />CSV yuklab olish</Button>}</div>{rows.length > 0 ? <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr>{columns.map((column) => <th key={column} className="px-5 py-3 font-medium">{column}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index} className="border-b last:border-0 hover:bg-muted/30">{columns.map((column) => <td key={column} className="px-5 py-4">{typeof row[column] === 'number' ? money(row[column]) : String(row[column] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <EmptyState text="Hozircha ma’lumot yo‘q" />}</Card>}
+    {generated && <Card className="mt-6 overflow-hidden"><div className="flex flex-col gap-3 border-b p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold">{selectedType}</h2><p className="mt-1 text-xs text-muted-foreground">{rows.length} ta natija</p></div>{rows.length > 0 && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={downloadCsv}><Download className="size-4" />CSV yuklab olish</Button><Button onClick={downloadPdf} disabled={pdfLoading}><Download className="size-4" />{pdfLoading ? 'Tayyorlanmoqda...' : 'PDF yuklab olish'}</Button></div>}</div>{rows.length > 0 ? <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr>{columns.map((column) => <th key={column} className="px-5 py-3 font-medium">{column}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index} className="border-b last:border-0 hover:bg-muted/30">{columns.map((column) => <td key={column} className="px-5 py-4">{column === 'Sana' ? formatTxDate(String(row[column] ?? '')) : typeof row[column] === 'number' ? money(row[column]) : String(row[column] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <EmptyState text="Hozircha ma’lumot yo‘q" />}</Card>}
   </>
 }
 
@@ -474,7 +510,7 @@ function ProductModal({ warehouses, categories, product, presetType, onClose, on
   const isEdit = !!product
   const [name, setName] = useState(product?.name ?? '')
   const [warehouse, setWarehouse] = useState(product?.warehouse ?? warehouses[0]?.name ?? '')
-  const [bolimId, setBolimId] = useState(product?.categoryParentId ?? (product?.categoryId && categories.find((category) => category.id === product.categoryId && !category.parentId)?.id) ?? '')
+  const [bolimId, setBolimId] = useState<string | null>(product?.categoryParentId ?? (product?.categoryId && categories.find((category) => category.id === product.categoryId && !category.parentId)?.id) ?? '')
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? '')
   const [type, setType] = useState(product?.type ?? presetType ?? 'tayyor')
   const [unit, setUnit] = useState(product?.unit ?? 'dona')
@@ -486,9 +522,9 @@ function ProductModal({ warehouses, categories, product, presetType, onClose, on
   // Oyna ochilgan zahoti — hech narsa kiritilmasa ham — ko'rinadigan tasodifiy shtrix kod. Faqat vizual: "Saqlash" bosilmasa, hech qayerga yozilmaydi.
   const [previewBarcode, setPreviewBarcode] = useState(() => product?.barcode || randomBarcode())
   const sections = categories.filter((category) => !category.parentId)
-  const childCategories = categories.filter((category) => category.parentId === bolimId)
-  const sectionCategory = sections.find((section) => section.id === bolimId)
-  const selectedCategory = categories.find((category) => category.id === categoryId)
+  const childCategories = categories.filter((category) => category.parentId != null && String(category.parentId) === String(bolimId))
+  const sectionCategory = sections.find((section) => String(section.id) === String(bolimId))
+  const selectedCategory = categories.find((category) => String(category.id) === String(categoryId))
   return <><div className="fixed inset-0 z-50 bg-black/40 p-4 overflow-y-auto" onClick={onClose}><div className="mx-auto my-[6vh] max-w-md rounded-xl border bg-card p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
     <div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">{isEdit ? 'Mahsulotni tahrirlash' : 'Mahsulot qo‘shish'}</h2><p className="mt-1 text-sm text-muted-foreground">{isEdit ? 'Mahsulot maʼlumotlarini yangilang.' : 'ID raqami saqlaganingizda avtomatik beriladi.'}</p></div><Button variant="ghost" onClick={onClose}><X className="size-5" /></Button></div>
 
@@ -504,8 +540,8 @@ function ProductModal({ warehouses, categories, product, presetType, onClose, on
         {productTypes.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
       </select>
     </Field>
-    <Field label="Bo‘lim"><select value={bolimId} onChange={(e) => { setBolimId(e.target.value); setCategoryId('') }} className={inputCls}><option value="">Bo‘limni tanlang</option>{sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}</select></Field>
-    <Field label="Kategoriya"><select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} disabled={!bolimId} className={inputCls + ' disabled:opacity-50'}><option value="">Kategoriyani tanlang</option>{sectionCategory && <option value={sectionCategory.id}>{sectionCategory.name} (bo‘limning o‘zi)</option>}{childCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field>
+    <Field label="Bo‘lim"><select value={String(bolimId)} onChange={(e) => { setBolimId(e.target.value || null); setCategoryId('') }} className={inputCls}><option value="">Bo‘limni tanlang</option>{sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}</select></Field>
+    <Field label="Kategoriya"><select value={String(categoryId)} onChange={(e) => setCategoryId(e.target.value)} disabled={!bolimId} className={inputCls + ' disabled:opacity-50'}><option value="">Kategoriyani tanlang</option>{sectionCategory && <option value={sectionCategory.id}>{sectionCategory.name} (bo‘limning o‘zi)</option>}{childCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field>
     <Field label="Ombor"><select value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className={inputCls}>{warehouses.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}</select></Field>
     <div className="mt-4 grid grid-cols-2 gap-3">
       <Field label="O‘lchov birligi"><input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="dona / metr / quti" className={inputCls} /></Field>
