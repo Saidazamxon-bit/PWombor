@@ -74,7 +74,6 @@ export const pageKeys = allNavItems.map((i) => i.key)
 export const isPageKey = (key: string) => pageKeys.includes(key)
 export const recentDate = '11.08.2026'
 export const reportTypes = ['Ombor qoldig‘i', 'Kirim-chiqim', 'Savdo hisoboti', 'Inventarizatsiya']
-export const notificationItems = [{ title: 'Qoldiq kamaygan', text: 'Qog‘oz A4 80g minimal qoldiqdan past', time: '12 daqiqa oldin', unread: true }, { title: 'Yangi kirim', text: 'FARGO TRADE MCHJ dan 12,8 mln so‘mlik kirim', time: '1 soat oldin', unread: true }, { title: 'Inventarizatsiya', text: 'Oylik inventarizatsiya 3 kundan keyin', time: 'Kecha', unread: false }]
 export const quickActions = [{ key: 'products', label: 'Mahsulot qo‘shish', icon: 'Plus' }, { key: 'purchases', label: 'Kirim yaratish', icon: 'ArrowDownToLine' }, { key: 'sales', label: 'Chiqim yaratish', icon: 'ArrowUpFromLine' }, { key: 'transfers', label: 'Ko‘chirish', icon: 'ArrowLeftRight' }]
 export const weekdays = ['Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan', 'Yak']
 export const monthTotal = chartData.reduce((sum, d) => sum + d.sales, 0)
@@ -103,7 +102,6 @@ export const collapsedNavWidth = 76
 export const mobileBreakpoint = 1024
 export const maxContentWidth = 1440
 export const defaultWarehouse = warehouseNames[0]
-export const notificationCount = notificationItems.filter((n) => n.unread).length
 export const lowStockMessage = 'Minimal qoldiqdan past mahsulotlar'
 export const dateFormat = 'DD.MM.YYYY'
 export const timeFormat = 'HH:mm'

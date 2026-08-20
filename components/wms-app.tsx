@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { BarChart3, Bell, Boxes, CalendarClock, ChartNoAxesCombined, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, FileBarChart, FileMinus2, LayoutDashboard, LogOut, Menu, Package, PackageCheck, PackagePlus, PackageOpen, ShoppingBag, ReceiptText, Plus, Search, Settings2, Tags, Truck, UserRound, Users, Warehouse, ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, CheckCircle2, AlertTriangle, MoreHorizontal, Download, X, TrendingUp, Pencil, Trash2, RefreshCw } from 'lucide-react'
-import { allNavItems, chartData, categoryData, dashboardCards as staticDashboardCards, detailText, getStatusClass, getTypeClass, labelMap, money, navGroups, notificationItems, roles as staticRoles, productTypes, productTypeLabel, productTypeByPage, randomBarcode } from '@/lib/wms-data'
+import { allNavItems, chartData, categoryData, dashboardCards as staticDashboardCards, detailText, getStatusClass, getTypeClass, labelMap, money, navGroups, roles as staticRoles, productTypes, productTypeLabel, productTypeByPage, randomBarcode } from '@/lib/wms-data'
 import { categoriesApi, dashboardApi, expiryApi, productsApi, barcodeApi, settingsApi, suppliersApi, transactionsApi, usersApi, warehousesApi } from '@/lib/api'
 import { BarcodeScanButton } from '@/components/barcode-scanner'
 import { BarcodeImage, downloadBarcodeLabel } from '@/components/barcode-image'
@@ -55,6 +55,30 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const notifications = useMemo(() => [
+    ...products
+      .filter((product) => product.status === 'Kam qoldiq')
+      .map((product) => ({
+        title: 'Qoldiq kamaygan',
+        text: `${product.name} minimal qoldiqdan past (${product.stock} ${product.unit})`,
+        unread: true,
+      })),
+    ...transactionsList
+      .filter((transaction) => transaction.type === 'Kirim')
+      .slice(0, 3)
+      .map((transaction) => ({
+        title: 'Yangi kirim',
+        text: `${transaction.reference} dan ${transaction.amount} so'mlik kirim`,
+        unread: true,
+      })),
+    ...(dashboardStats?.expiringSoon > 0
+      ? [{
+          title: 'Muddati yaqinlashmoqda',
+          text: `${dashboardStats.expiringSoon} ta partiya muddati yaqinlashmoqda`,
+          unread: true,
+        }]
+      : []),
+  ], [products, transactionsList, dashboardStats])
   const filteredProducts = useMemo(() => {
     let base = products
     const wantedType = productTypeByPage[page]
@@ -150,7 +174,7 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 backdrop-blur md:px-6">
         <div className="flex items-center gap-3"><Button variant="ghost" className="lg:hidden" onClick={() => setMobileOpen(true)}><Menu className="size-5" /></Button><div className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex"><span>PW OMBOR</span><ChevronRight className="size-4" /><span className="font-medium text-foreground">{pageTitle}</span></div><div className="flex items-center gap-2 sm:hidden"><span className="text-sm font-black text-primary">PW OMBOR</span></div></div>
         <div className="flex items-center gap-1 md:gap-3">
-          <div className="relative"><Button variant="ghost" onClick={() => setNotificationsOpen(!notificationsOpen)}><Bell className="size-5" /><span className="absolute right-1 top-1 size-2 rounded-full bg-cyan-400" /></Button>{notificationsOpen && <Card className="absolute right-0 top-12 z-50 w-80 p-3 shadow-xl"><div className="flex items-center justify-between border-b pb-3"><b>Bildirishnomalar</b><Badge className="bg-primary/10 text-primary">2 yangi</Badge></div>{notificationItems.map((n) => <div key={n.title} className="border-b py-3 last:border-0"><div className="flex gap-2"><span className={`mt-1 size-2 shrink-0 rounded-full ${n.unread ? 'bg-primary' : 'bg-muted'}`} /><div><p className="text-sm font-medium">{n.title}</p><p className="text-xs text-muted-foreground">{n.text}</p><p className="mt-1 text-[11px] text-muted-foreground">{n.time}</p></div></div></div>)}</Card>}</div>
+          <div className="relative"><Button variant="ghost" onClick={() => setNotificationsOpen(!notificationsOpen)}><Bell className="size-5" />{notifications.length > 0 && <span className="absolute right-1 top-1 size-2 rounded-full bg-cyan-400" />}</Button>{notificationsOpen && <Card className="absolute right-0 top-12 z-50 w-80 p-3 shadow-xl"><div className="flex items-center justify-between border-b pb-3"><b>Bildirishnomalar</b><Badge className="bg-primary/10 text-primary">{notifications.length} yangi</Badge></div>{notifications.length > 0 ? notifications.map((n) => <div key={`${n.title}-${n.text}`} className="border-b py-3 last:border-0"><div className="flex gap-2"><span className={`mt-1 size-2 shrink-0 rounded-full ${n.unread ? 'bg-primary' : 'bg-muted'}`} /><div><p className="text-sm font-medium">{n.title}</p><p className="text-xs text-muted-foreground">{n.text}</p></div></div></div>) : <div className="py-6 text-center text-sm text-muted-foreground">Hozircha bildirishnoma yo‘q</div>}</Card>}</div>
           <div className="relative">
             <button onClick={() => setUserMenuOpen(!userMenuOpen)} className="hidden items-center gap-2 border-l pl-3 sm:flex"><div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">{initials}</div><div className="hidden text-right md:block"><div className="text-sm font-semibold">{currentUser.username}</div><div className="text-xs text-muted-foreground">{roleLabel[currentUser.role] ?? currentUser.role}</div></div><ChevronDown className="size-4 text-muted-foreground" /></button>
             {userMenuOpen && <Card className="absolute right-0 top-12 z-50 w-48 p-2 shadow-xl"><button onClick={onLogout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-600 hover:bg-red-50"><LogOut className="size-4" />Chiqish</button></Card>}
