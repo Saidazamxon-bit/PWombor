@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { BarChart3, Bell, Boxes, CalendarClock, ChartNoAxesCombined, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, FileBarChart, FileMinus2, LayoutDashboard, LogOut, Menu, Package, PackageCheck, PackagePlus, PackageOpen, ShoppingBag, ReceiptText, Plus, Search, Settings2, Tags, Truck, UserRound, Users, Warehouse, ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, CheckCircle2, AlertTriangle, MoreHorizontal, Download, X, TrendingUp, Pencil, Trash2, RefreshCw } from 'lucide-react'
-import { allNavItems, chartData, categoryData, dashboardCards as staticDashboardCards, detailText, getStatusClass, getTypeClass, labelMap, money, navGroups, roles as staticRoles, productTypes, productTypeLabel, productTypeByPage, randomBarcode } from '@/lib/wms-data'
-import { categoriesApi, dashboardApi, expiryApi, productsApi, barcodeApi, settingsApi, suppliersApi, transactionsApi, usersApi, warehousesApi } from '@/lib/api'
+import { Fragment, useEffect, useMemo, useState } from 'react'
+import { BarChart3, Bell, BookOpen, Boxes, CalendarClock, ChartNoAxesCombined, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, FileBarChart, FileMinus2, LayoutDashboard, LogOut, Menu, Package, PackageCheck, PackagePlus, PackageOpen, ShoppingBag, ReceiptText, Plus, Search, Settings2, Tags, Truck, UserRound, Users, Warehouse, ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, CheckCircle2, AlertTriangle, MoreHorizontal, Download, X, TrendingUp, Pencil, Trash2, RefreshCw } from 'lucide-react'
+import { allNavItems, chartData, categoryData, dashboardCards as staticDashboardCards, detailText, getStatusClass, getTypeClass, guideContent, labelMap, money, navGroups, reportTypes, roles as staticRoles, productTypes, productTypeLabel, productTypeByPage, randomBarcode } from '@/lib/wms-data'
+import { categoriesApi, dashboardApi, expiryApi, productsApi, barcodeApi, reportsApi, settingsApi, suppliersApi, transactionsApi, usersApi, warehousesApi } from '@/lib/api'
 import { BarcodeScanButton } from '@/components/barcode-scanner'
 import { BarcodeImage, downloadBarcodeLabel } from '@/components/barcode-image'
 
@@ -12,11 +12,11 @@ type Warehouse = { id: string; name: string; code: string; products: number; val
 type Supplier = { id: string; name: string; phone: string; orders: number; debt: number; status: string }
 type AppUser = { id: string; name: string; email: string; role: string; active: boolean }
 type ExpiryRow = { id: string; name: string; barcode: string; batch: string; expiry: string; days: number; qty: number; warehouse: string }
-type Transaction = { id: string; docNo: string; type: string; reference: string; qty: number; amount: number; status: string }
+type Transaction = { id: string; docNo: string; type: string; reference: string; qty: number; amount: number; status: string; date?: string; productName?: string; product?: string; productId?: string }
 type Category = { id: string; name: string }
 type CurrentUser = { id: string; username: string; role: string }
 
-const iconFor: Record<string, React.ElementType> = { LayoutDashboard, Package, PackageCheck, PackagePlus, PackageOpen, ShoppingBag, ReceiptText, Boxes, ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight, FileMinus2, Truck, ChartNoAxesCombined, FileBarChart, CalendarClock, Settings2, Users, Warehouse, Tags }
+const iconFor: Record<string, React.ElementType> = { LayoutDashboard, Package, PackageCheck, PackagePlus, PackageOpen, ShoppingBag, ReceiptText, Boxes, ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight, FileMinus2, Truck, ChartNoAxesCombined, FileBarChart, CalendarClock, Settings2, Users, Warehouse, Tags, BookOpen }
 const productLikePages = new Set(['products', 'inventory', 'ready-products', 'raw-products', 'semi-products', 'available'])
 const roleLabel: Record<string, string> = { admin: 'Administrator', manager: 'Ombor mudiri', operator: 'Operator' }
 const txTypeKey: Record<string, string> = { purchases: 'kirim', sales: 'chiqim', sold: 'chiqim', transfers: 'transfer', writeoffs: 'hisobdan_chiqarish' }
@@ -185,6 +185,12 @@ export function WmsApp({ currentUser, onLogout }: { currentUser: CurrentUser; on
         {!loading && backendError && <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-500" /><div><b className="block">Backendga to‘liq ulanib bo‘lmadi</b><p className="mt-1 text-amber-800">{backendError}</p><p className="mt-2 text-xs text-amber-700">Tekshiring: NEXT_PUBLIC_API_URL to‘g‘ri sozlanganmi, PHP fayllar hostingga yuklanganmi, schema.sql import qilinganmi.</p></div></div>}
         {page === 'dashboard'
           ? <Dashboard stats={dashboardStats} onNavigate={go} products={products} transactions={transactionsList} onAction={(key) => { setEditingProduct(null); setPresetProductType(undefined); setModal(key === 'products' ? 'product' : (['purchases', 'sales', 'transfers'].includes(key) ? 'transaction' : 'simple')) }} />
+          : page === 'analytics'
+          ? <AnalyticsPage products={products} transactions={transactionsList} warehouses={warehousesList} categories={categoriesList} />
+          : page === 'reports'
+          ? <ReportsPage products={products} transactions={transactionsList} warehouses={warehousesList} />
+          : page === 'guide'
+          ? <GuidePage onNavigate={go} />
           : page === 'warehouses'
           ? <WarehousesPage warehouses={warehousesList} loading={loading} onAdd={() => { setEditingWarehouse(null); setModal('warehouse') }} onEdit={(w) => { setEditingWarehouse(w); setModal('warehouse') }} onDelete={deleteWarehouse} />
           : page === 'settings'
@@ -234,6 +240,95 @@ function Dashboard({ stats, onNavigate, products, transactions, onAction }: { st
       <Card><div className="flex items-center justify-between border-b p-4 md:p-6"><div><h2 className="font-semibold">Kam qoldiq</h2><p className="mt-1 text-xs text-muted-foreground">Diqqat talab qiladigan mahsulotlar</p></div><AlertTriangle className="size-5 text-amber-500" /></div><div className="flex flex-col">{lowStockProducts.map((p) => <button key={p.id} onClick={() => onNavigate('inventory')} className="flex items-center justify-between border-b p-4 text-left last:border-0 hover:bg-muted/30"><div><p className="text-sm font-semibold">{p.name}</p><p className="mt-1 text-xs text-muted-foreground">{p.sku}{p.barcode ? ` • kod: ${p.barcode}` : ''} • {p.warehouse}</p></div><div className="text-right"><b className="text-amber-600">{p.stock} {p.unit}</b><p className="text-[11px] text-muted-foreground">min: {p.minStock}</p></div></button>)}{lowStockProducts.length === 0 && <div className="p-6 text-center text-sm text-muted-foreground">Kam qoldiq yo‘q</div>}</div><div className="p-4"><Button variant="outline" className="w-full" onClick={() => onNavigate('inventory')}>Qoldiqlarni ko‘rish</Button></div></Card>
     </div>
     <div className="mt-6"><div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">Tezkor amallar</h2></div><div className="grid grid-cols-2 gap-3 md:grid-cols-4">{['products', 'purchases', 'sales', 'transfers'].map((key, i) => <button key={key} onClick={() => onAction(key)} className="flex items-center gap-3 rounded-xl border bg-card p-4 text-left transition hover:border-primary hover:shadow-sm"><div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">{i === 0 ? <Plus className="size-4" /> : i === 1 ? <ArrowDownToLine className="size-4" /> : i === 2 ? <ArrowUpFromLine className="size-4" /> : <ArrowLeftRight className="size-4" />}</div><span className="text-sm font-semibold">{['Mahsulot qo‘shish', 'Kirim yaratish', 'Chiqim yaratish', 'Ko‘chirish'][i]}</span></button>)}</div></div>
+  </>
+}
+
+function AnalyticsPage({ products, transactions, warehouses, categories }: { products: Product[]; transactions: Transaction[]; warehouses: Warehouse[]; categories: Category[] }) {
+  const totalValue = products.reduce((sum, product) => sum + product.stock * product.price, 0)
+  const lowStock = products.filter((product) => product.status === 'Kam qoldiq').length
+  const categoryRows = categories.map((category) => ({ name: category.name, value: products.filter((product) => product.category === category.name).reduce((sum, product) => sum + product.stock * product.price, 0) })).filter((row) => row.value > 0)
+  const knownCategories = new Set(categoryRows.map((row) => row.name))
+  const uncategorizedValue = products.filter((product) => !knownCategories.has(product.category)).reduce((sum, product) => sum + product.stock * product.price, 0)
+  if (uncategorizedValue > 0) categoryRows.push({ name: 'Boshqa', value: uncategorizedValue })
+  const maxCategory = Math.max(...categoryRows.map((row) => row.value), 1)
+  const warehouseRows = warehouses.map((warehouse) => { const rows = products.filter((product) => product.warehouse === warehouse.name); return { name: warehouse.name, count: rows.length, value: rows.reduce((sum, product) => sum + product.stock * product.price, 0) } })
+  const maxWarehouse = Math.max(...warehouseRows.map((row) => row.value), 1)
+  const trendRows = transactions.filter((transaction) => transaction.type === 'Kirim' || transaction.type === 'Chiqim').slice(0, 7).reverse().map((transaction, index) => ({ label: transaction.date || `#${index + 1}`, kirim: transaction.type === 'Kirim' ? transaction.amount : 0, chiqim: transaction.type === 'Chiqim' ? transaction.amount : 0 }))
+  const maxTrend = Math.max(...trendRows.flatMap((row) => [row.kirim, row.chiqim]), 1)
+  const typeRows = productTypes.map((type) => { const rows = products.filter((product) => (product.type || 'tayyor') === type.key); return { ...type, count: rows.length, value: rows.reduce((sum, product) => sum + product.stock * product.price, 0) } })
+  const movement = new Map<string, { name: string; count: number; value: number }>()
+  transactions.filter((transaction) => transaction.type === 'Kirim' || transaction.type === 'Chiqim').forEach((transaction) => { const name = transaction.productName || transaction.product || transaction.reference || 'Noma’lum mahsulot'; const row = movement.get(name) || { name, count: 0, value: 0 }; row.count += Number(transaction.qty) || 1; row.value += Number(transaction.amount) || 0; movement.set(name, row) })
+  const topProducts = [...movement.values()].sort((a, b) => b.count - a.count).slice(0, 5)
+  return <>
+    <PageHeader title="Analitika" description="Real ombor ma’lumotlari asosida taqsimot va operatsiyalar tahlili" />
+    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4"><AnalyticsCard label="Jami inventar qiymati" value={money(totalValue)} /><AnalyticsCard label="Jami mahsulot soni" value={`${products.length} ta`} /><AnalyticsCard label="Kam qoldiqdagi mahsulotlar" value={`${lowStock} ta`} /><AnalyticsCard label="Faol omborlar" value={`${warehouses.length} ta`} /></div>
+    <div className="grid gap-6 lg:grid-cols-2">
+      <Card className="p-5"><h2 className="font-semibold">Kategoriyalar bo‘yicha qiymat</h2><div className="mt-5 flex flex-col gap-3">{categoryRows.map((row) => <div key={row.name}><div className="mb-1 flex justify-between text-xs"><span>{row.name}</span><span className="font-semibold">{totalValue ? Math.round(row.value / totalValue * 100) : 0}% · {money(row.value)}</span></div><div className="h-3 rounded-full bg-muted"><div className="h-3 rounded-full bg-primary" style={{ width: `${row.value / maxCategory * 100}%` }} /></div></div>)}{categoryRows.length === 0 && <EmptyState text="Hozircha ma’lumot yo‘q" />}</div></Card>
+      <Card className="p-5"><h2 className="font-semibold">Omborlar bo‘yicha taqsimot</h2><div className="mt-5 flex flex-col gap-4">{warehouseRows.map((row) => <div key={row.name}><div className="flex justify-between text-sm"><span className="font-medium">{row.name}</span><span>{row.count} ta · {money(row.value)}</span></div><div className="mt-2 h-3 rounded-full bg-muted"><div className="h-3 rounded-full bg-cyan-400" style={{ width: `${row.value / maxWarehouse * 100}%` }} /></div></div>)}{warehouseRows.length === 0 && <EmptyState text="Hozircha ma’lumot yo‘q" />}</div></Card>
+      <Card className="p-5"><div className="flex items-start justify-between"><div><h2 className="font-semibold">Kirim / Chiqim dinamikasi</h2><p className="mt-1 text-xs text-muted-foreground">Sana mavjud bo‘lmasa, so‘nggi tranzaksiyalar tartibi</p></div><div className="flex gap-3 text-xs"><span className="flex items-center gap-1"><i className="size-2 rounded-full bg-cyan-400" />Kirim</span><span className="flex items-center gap-1"><i className="size-2 rounded-full bg-primary" />Chiqim</span></div></div><div className="mt-5 flex h-48 items-end gap-2 border-b border-l px-3 pb-0 pt-3">{trendRows.map((row) => <div key={`${row.label}-${row.kirim}-${row.chiqim}`} className="flex h-full flex-1 items-end justify-center gap-1"><div className="w-1/3 rounded-t bg-cyan-400" style={{ height: `${row.kirim / maxTrend * 100}%` }} title={`Kirim: ${money(row.kirim)}`} /><div className="w-1/3 rounded-t bg-primary" style={{ height: `${row.chiqim / maxTrend * 100}%` }} title={`Chiqim: ${money(row.chiqim)}`} /></div>)}{trendRows.length === 0 && <div className="m-auto text-sm text-muted-foreground">Hozircha ma’lumot yo‘q</div>}</div><div className="mt-2 flex gap-2 overflow-hidden text-[10px] text-muted-foreground">{trendRows.map((row) => <span key={row.label} className="min-w-0 flex-1 truncate text-center">{row.label}</span>)}</div></Card>
+      <Card className="p-5"><h2 className="font-semibold">Mahsulot turlari</h2><div className="mt-4 grid gap-3 sm:grid-cols-3">{typeRows.map((row) => <div key={row.key} className="rounded-lg border bg-muted/20 p-4"><p className="text-xs text-muted-foreground">{row.label}</p><p className="mt-2 text-xl font-bold">{row.count} ta</p><p className="mt-1 text-xs text-muted-foreground">{money(row.value)}</p></div>)}</div></Card>
+    </div>
+    <Card className="mt-6 overflow-hidden"><div className="border-b p-5"><h2 className="font-semibold">Eng ko‘p harakat qilgan TOP-5 mahsulot</h2><p className="mt-1 text-xs text-muted-foreground">Kirim va chiqim hujjatlaridagi miqdor bo‘yicha</p></div><div className="overflow-x-auto"><table className="w-full min-w-[600px] text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-5 py-3">Mahsulot</th><th className="px-5 py-3">Harakat miqdori</th><th className="px-5 py-3">Operatsiya summasi</th></tr></thead><tbody>{topProducts.map((row) => <tr key={row.name} className="border-b last:border-0"><td className="px-5 py-4 font-medium">{row.name}</td><td className="px-5 py-4">{row.count}</td><td className="px-5 py-4">{money(row.value)}</td></tr>)}</tbody></table></div>{topProducts.length === 0 && <EmptyState text="Hozircha ma’lumot yo‘q" />}</Card>
+  </>
+}
+
+function AnalyticsCard({ label, value }: { label: string; value: string }) { return <Card className="p-4"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-3 text-lg font-bold md:text-2xl">{value}</p></Card> }
+function EmptyState({ text }: { text: string }) { return <div className="p-8 text-center text-sm text-muted-foreground">{text}</div> }
+
+function ReportsPage({ products, transactions, warehouses }: { products: Product[]; transactions: Transaction[]; warehouses: Warehouse[] }) {
+  const [selectedType, setSelectedType] = useState(reportTypes[0])
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [warehouse, setWarehouse] = useState('')
+  const [rows, setRows] = useState<Record<string, any>[]>([])
+  const [columns, setColumns] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [generated, setGenerated] = useState(false)
+
+  const fallback = () => {
+    const productRows = products.filter((product) => !warehouse || product.warehouse === warehouse)
+    if (selectedType === 'Ombor qoldig‘i') return productRows.map((product) => ({ Nomi: product.name, Ombor: product.warehouse, Qoldiq: `${product.stock} ${product.unit}`, Narx: product.price, 'Jami qiymat': product.stock * product.price }))
+    if (selectedType === 'Inventarizatsiya') return productRows.map((product) => ({ ID: product.productId, Nomi: product.name, Turi: productTypeLabel[product.type || 'tayyor'], Qoldiq: product.stock, 'Min. qoldiq': product.minStock, Holat: product.status }))
+    const txRows = transactions.filter((transaction) => (selectedType === 'Savdo hisoboti' ? transaction.type === 'Chiqim' : transaction.type === 'Kirim' || transaction.type === 'Chiqim')).filter((transaction) => !from || (transaction.date || '').includes(from)).filter((transaction) => !to || (transaction.date || '').includes(to))
+    if (selectedType === 'Savdo hisoboti') return [{ 'Jami chiqim soni': txRows.length, 'Jami summa': txRows.reduce((sum, transaction) => sum + (Number(transaction.amount) || 0), 0) }]
+    return txRows.map((transaction) => ({ Hujjat: transaction.docNo || transaction.id, Turi: transaction.type, Sana: transaction.date || '—', Izoh: transaction.reference, Summa: transaction.amount || 0 }))
+  }
+
+  const createReport = async () => {
+    setLoading(true); setGenerated(true)
+    const params: Record<string, string> = {}; if (from) params.from = from; if (to) params.to = to; if (warehouse) params.warehouse = warehouse
+    let data: any = null
+    try { data = await reportsApi.get(selectedType, params) } catch { data = null }
+    const backendRows = Array.isArray(data) ? data : Array.isArray(data?.rows) ? data.rows : Array.isArray(data?.data) ? data.data : null
+    const result = backendRows && backendRows.length > 0 ? backendRows : fallback()
+    setRows(result); setColumns(Object.keys(result[0] || {})); setLoading(false)
+  }
+
+  const downloadCsv = () => {
+    const csv = [columns, ...rows.map((row) => columns.map((column) => String(row[column] ?? '').replace(/"/g, '""')))].map((line) => line.map((cell) => `"${cell}"`).join(',')).join('\n')
+    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })); link.download = `${selectedType}.csv`; link.click(); URL.revokeObjectURL(link.href)
+  }
+
+  return <>
+    <PageHeader title="Hisobotlar" description="Ombor va operatsiyalar bo‘yicha hisobotlarni yarating va yuklab oling." />
+    <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{reportTypes.map((type) => <button key={type} onClick={() => { setSelectedType(type); setGenerated(false) }} className={`rounded-xl border p-4 text-left transition ${selectedType === type ? 'border-primary bg-primary/5 shadow-sm' : 'bg-card hover:border-primary'}`}><FileBarChart className="size-5 text-primary" /><p className="mt-3 text-sm font-semibold">{type}</p><p className="mt-1 text-xs text-muted-foreground">{type === 'Ombor qoldig‘i' ? 'Joriy qoldiq va qiymat' : type === 'Kirim-chiqim' ? 'Operatsiyalar tarixi' : type === 'Savdo hisoboti' ? 'Chiqimlar yig‘indisi' : 'To‘liq inventar holati'}</p></button>)}</div>
+    <Card className="p-5"><div className="grid gap-4 md:grid-cols-4 md:items-end"><Field label="Boshlanish sanasi"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} /></Field><Field label="Tugash sanasi"><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} /></Field><Field label="Ombor"><select value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className={inputCls}><option value="">Barcha omborlar</option>{warehouses.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select></Field><Button onClick={createReport} disabled={loading}>{loading ? 'Yuklanmoqda...' : 'Hisobotni yaratish'}</Button></div></Card>
+    {generated && <Card className="mt-6 overflow-hidden"><div className="flex items-center justify-between border-b p-5"><div><h2 className="font-semibold">{selectedType}</h2><p className="mt-1 text-xs text-muted-foreground">{rows.length} ta natija</p></div>{rows.length > 0 && <Button variant="outline" onClick={downloadCsv}><Download className="size-4" />CSV yuklab olish</Button>}</div>{rows.length > 0 ? <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr>{columns.map((column) => <th key={column} className="px-5 py-3 font-medium">{column}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index} className="border-b last:border-0 hover:bg-muted/30">{columns.map((column) => <td key={column} className="px-5 py-4">{typeof row[column] === 'number' ? money(row[column]) : String(row[column] ?? '—')}</td>)}</tr>)}</tbody></table></div> : <EmptyState text="Hozircha ma’lumot yo‘q" />}</Card>}
+  </>
+}
+
+function GuidePage({ onNavigate }: { onNavigate: (key: string) => void }) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState('dashboard')
+  const [selected, setSelected] = useState('')
+  const visible = guideContent.filter((item) => `${item.title} ${item.text}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const flow = [{ key: 'suppliers', label: 'Yetkazib beruvchi', color: 'bg-amber-100 text-amber-800' }, { key: 'purchases', label: 'Kirim yaratish', color: 'bg-cyan-100 text-cyan-800' }, { key: 'inventory', label: 'Ombor\n(qoldiq oshadi)', color: 'bg-blue-100 text-blue-800' }, { key: 'products', label: 'Mahsulot turlari', color: 'bg-violet-100 text-violet-800' }, { key: 'available', label: 'Sotuvda mavjud', color: 'bg-emerald-100 text-emerald-800' }, { key: 'sales', label: 'Chiqim / Sotilgan', color: 'bg-rose-100 text-rose-800' }, { key: 'sales', label: 'Mijoz', color: 'bg-slate-100 text-slate-800' }]
+  const sideBranches = [{ key: 'transfers', label: 'Ko‘chirish → boshqa ombor' }, { key: 'writeoffs', label: 'Hisobdan chiqarish → yo‘q qilinadi' }, { key: 'expiry', label: 'Yaroqlilik muddati kuzatuvi' }, { key: 'analytics', label: 'Analitika / Hisobotlar' }]
+  return <>
+    <PageHeader title="Qo‘llanma" description="PW OMBOR bo‘limlari va ish jarayonlari bo‘yicha amaliy yo‘riqnoma" />
+    <div className="relative mb-6"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Qo‘llanmadan qidirish..." className="h-11 w-full rounded-lg border bg-card pl-10 pr-3 text-sm outline-none focus:border-primary" /></div>
+    <Card className="mb-6 overflow-hidden p-5"><h2 className="font-semibold">Ombor ish jarayoni</h2><div className="mt-5 flex flex-wrap items-center justify-center gap-2">{flow.map((item, index) => <Fragment key={`${item.key}-${item.label}`}><button onClick={() => { setSelected(item.key); onNavigate(item.key) }} className={`whitespace-pre-line rounded-lg px-3 py-3 text-center text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow ${item.color}`}>{item.label}</button>{index < flow.length - 1 && <ChevronRight className="size-4 text-muted-foreground" />}</Fragment>)}</div><div className="mt-4 flex flex-wrap justify-center gap-2">{sideBranches.map((branch) => <button key={branch.key} onClick={() => { setSelected(branch.key); onNavigate(branch.key) }} className="rounded-lg border border-dashed px-3 py-2 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary">↘ {branch.label}</button>)}</div>{selected && <p className="mt-4 rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{guideContent.find((item) => item.key === selected)?.text}</p>}</Card>
+    <div className="space-y-3">{visible.map((item) => <Card key={item.key} className="overflow-hidden"><button onClick={() => setOpen(open === item.key ? '' : item.key)} className="flex w-full items-center justify-between p-4 text-left"><span className="font-semibold">{item.title}</span><ChevronDown className={`size-4 transition ${open === item.key ? 'rotate-180' : ''}`} /></button>{open === item.key && <div className="border-t px-4 pb-5 pt-3 text-sm leading-6 text-muted-foreground">{item.text}</div>}</Card>)}{visible.length === 0 && <Card><EmptyState text="Hozircha ma’lumot yo‘q" /></Card>}</div>
   </>
 }
 
