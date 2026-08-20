@@ -37,8 +37,10 @@ export function BarcodeScanButton({ onScan }: { onScan: (code: string) => void }
 function ScannerModal({ onClose, onScan }: { onClose: () => void; onScan: (code: string) => void }) {
   const elementId = useRef(`pw-scanner-${Math.random().toString(36).slice(2)}`).current
   const scannerRef = useRef<any>(null)
+  const zoomFeatureRef = useRef<any>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [canZoom, setCanZoom] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -76,6 +78,8 @@ function ScannerModal({ onClose, onScan }: { onClose: () => void; onScan: (code:
             const minZoom = typeof zoomFeature?.min === 'function' ? zoomFeature.min() : zoomFeature?.min
             const maxZoom = typeof zoomFeature?.max === 'function' ? zoomFeature.max() : zoomFeature?.max
             if (zoomFeature && Number(minZoom) <= 1 && Number(maxZoom) >= 1) {
+              zoomFeatureRef.current = zoomFeature
+              setCanZoom(true)
               if (typeof zoomFeature.apply === 'function') await zoomFeature.apply(1)
               else await scanner.applyVideoConstraints?.({ advanced: [{ zoom: 1 }] })
             }
@@ -96,6 +100,16 @@ function ScannerModal({ onClose, onScan }: { onClose: () => void; onScan: (code:
     }
   }, [])
 
+  const resetZoom = () => {
+    try {
+      const zoomFeature = zoomFeatureRef.current
+      const result = typeof zoomFeature?.apply === 'function'
+        ? zoomFeature.apply(1)
+        : scannerRef.current?.applyVideoConstraints?.({ advanced: [{ zoom: 1 }] })
+      Promise.resolve(result).catch(() => {})
+    } catch {}
+  }
+
   return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
     <div className="w-full max-w-sm rounded-xl bg-card p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
       <div className="mb-3 flex items-center justify-between">
@@ -105,7 +119,7 @@ function ScannerModal({ onClose, onScan }: { onClose: () => void; onScan: (code:
       {loading && <p className="mb-2 text-xs text-muted-foreground">Kamera yuklanmoqda...</p>}
       {error
         ? <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{error}</div>
-        : <div id={elementId} className="overflow-hidden rounded-lg bg-black" />}
+        : <div className="relative"><div id={elementId} className="overflow-hidden rounded-lg bg-black" />{canZoom && <button type="button" onClick={resetZoom} className="absolute right-2 top-2 z-10 rounded-full bg-black/60 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur hover:bg-black/80">1x</button>}</div>}
       <p className="mt-3 text-center text-xs text-muted-foreground">Kodni kameraga aniq tuting. Ishlamasa, pastdagi maydonga qo‘lda kiriting.</p>
     </div>
   </div>
